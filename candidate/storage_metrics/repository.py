@@ -1,8 +1,8 @@
 """Fetch local aggregate history and latest-only weekly file details from CSV.
 
 Scans and inclusive monthly age bins are keyed by readable disk path and date.
-Storage quantities are finite nonnegative GiB. The stale threshold is strictly
-greater than 365 days, including within an age bin that crosses that threshold.
+Storage quantities are finite nonnegative GiB. The stale threshold is age 365
+days or more, which is exactly the 365+ age bin.
 Only each disk's latest detailed inventory is retained; older aggregates do
 not make historical file records available. No live disk scanning is performed.
 """
@@ -16,10 +16,11 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from .models import AgeBucket, FileRecord, Snapshot
 
+AGE_EDGES = (0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 365)
 AGE_COLUMNS = [
-    ("age_{}_{}_gib".format(lower, upper if upper is not None else "plus"), lower, upper)
-    for lower, upper in [(0, 30)] + [(end - 29, end) for end in range(60, 541, 30)] + [(541, None)]
-]
+    ("age_{}_{}_gib".format(lower, upper), lower, upper - 1)
+    for lower, upper in zip(AGE_EDGES, AGE_EDGES[1:])
+] + [("age_{}_plus_gib".format(AGE_EDGES[-1]), AGE_EDGES[-1], None)]
 
 
 class FileHistoryUnavailable(ValueError):
@@ -111,13 +112,9 @@ class SnapshotRepository:
                 if not math.isclose(math.fsum(bucket.size_gib for bucket in buckets), snapshot.total_gib,
                                     rel_tol=1e-9, abs_tol=1e-9):
                     raise ValueError("Age bucket GiB do not sum to total GiB: {} {}".format(*key))
-                wholly_stale = math.fsum(bucket.size_gib for bucket in buckets if bucket.min_age_days > 365)
-                crossing = math.fsum(bucket.size_gib for bucket in buckets if bucket.min_age_days <= 365
-                                     and (bucket.max_age_days is None or bucket.max_age_days > 365))
-                upper = wholly_stale + crossing
-                if ((snapshot.stale_gib < wholly_stale and not math.isclose(snapshot.stale_gib, wholly_stale, rel_tol=1e-9, abs_tol=1e-9))
-                        or (snapshot.stale_gib > upper and not math.isclose(snapshot.stale_gib, upper, rel_tol=1e-9, abs_tol=1e-9))):
-                    raise ValueError("Stale GiB outside monthly-bin bounds: {} {}".format(*key))
+                stale_from_bins = math.fsum(bucket.size_gib for bucket in buckets if bucket.min_age_days >= 365)
+                if not math.isclose(snapshot.stale_gib, stale_from_bins, rel_tol=1e-9, abs_tol=1e-9):
+                    raise ValueError("Stale GiB does not match the 365+ bin: {} {}".format(*key))
                 self._snapshots[key] = snapshot
                 self._buckets[key] = buckets
                 if snapshot.disk not in self._latest or snapshot.scanned_at > self._latest[snapshot.disk].scanned_at:

@@ -70,9 +70,9 @@ The repository provides:
 For this exercise:
 
 - `days_since_last_access` is the whole number of days since a file was last accessed, measured at the scan date.
-- "Over a year" means **strictly more than 365 days**: age 365 is not stale; age 366 is stale.
-- Age bins are monthly through 18 months (approximately 1.5 years), using **30-day months**: 0–30, 31–60, …, 511–540 days, plus an older-than-540-days bin. Bounds are inclusive.
-- The 365-day stale threshold falls inside the 361–390-day bin. `stale_gib` is the exact stale total; it is not the sum of that entire bin and the older bins.
+- "Over a year" means **365 days or more**: age 364 is not stale; age 365 is stale.
+- Age bins use the edges `0, 30, 60, …, 300, 330, 365`: each bounded bin covers `[lower, upper)`, so `age_0_30_gib` covers ages 0–29 and `age_330_365_gib` covers 330–364. The final `age_365_plus_gib` bin starts at age 365.
+- The `age_365_plus_gib` bin is exactly the stale bucket. `stale_gib` is its total; there is no crossing-bin split to infer.
 - All stored size values and the existing stale-data report use **GiB** (1 GiB = 1,073,741,824 bytes). Sizes are logical file sizes; fractional GiB are supported. Your KPI can use a different unit.
 
 Ask the interviewer about other operational constraints or information you need before choosing your approach.

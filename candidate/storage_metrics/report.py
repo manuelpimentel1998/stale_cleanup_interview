@@ -34,7 +34,7 @@ def render_report(
     Raises:
         Exception: Repository or calculator errors propagate to the caller.
     """
-    lines = ["Stale: last accessed more than 365 days before the scan.",
+    lines = ["Stale: last accessed at least 365 days before the scan.",
              "Candidate KPI: interpretation and units defined by the candidate."]
     snapshots = repository.list_snapshots(disk)
     if not snapshots:

@@ -34,14 +34,14 @@ There are 53 weekly scans per disk, from 2025-11-23 through 2026-11-22: 52 seven
 
 | Disk | Stale-data history | Data aging into stale per interval | Previously stale data removed per interval |
 | --- | --- | --- | --- |
-| `/projects/atlas` | 10,240 → 30,208 over the year | 896 | 512 |
-| `/projects/birch` | 4,096 throughout the year | 448 | 448 |
+| `/projects/atlas` | 10,368 → 30,336 over the year | 896 | 512 |
+| `/projects/birch` | 4,160 throughout the year | 448 | 448 |
 
 Across the 52 intervals:
 
 - The synthetic cleanup schedule removes **49,920 GiB** of previously stale data.
 - **69,888 GiB** ages into the stale category.
-- The fleet stale total therefore **grows by 19,968 GiB**, from 14,336 to 34,304 GiB.
+- The fleet stale total therefore **grows by 19,968 GiB**, from 14,528 to 34,496 GiB.
 
 These are facts of the private generator and its event schedule. They are **not evidence available from an actual production snapshot about who performed a deletion**. The candidate data contains no actor, reason, or cleanup-event labels.
 
@@ -67,53 +67,91 @@ Offer these when relevant; the exercise is not a guessing game.
 
 Do not reject an approach because it differs from the reference. Challenge its evidence and operational costs instead.
 
-## Reference approach A: age-cohort estimate
-
-For an interval:
+## Reference approach A: 28-day age-cohort estimate (`solutions/cohort.py`)
 
 ```text
-estimated stale exits GiB = previous stale GiB
-                          + estimated GiB aging into stale
-                          - current stale GiB
+estimated cleanup = previous stale + previous 330-365 bucket - current stale
 ```
 
-Simply subtracting inbound from the current stale total gives an adjusted stock, not the interval's cleanup amount. The previous stock is needed to calculate the change.
+The month's aging inflow is assumed to be the whole previous 11-12 month bucket
+(ages 330-364, the `330-365` edge bin), because those files should now be at or
+over a year. A month is assumed to be exactly 28 days, so weekly scans give
+non-overlapping four-scan pairs. Verify with
+`python3 -m interviewer.solutions.cohort --verify`; add `--plot DIR` to save the
+KPI graph through the candidate plotting helper.
 
-Monthly bins use 30-day approximations, covering 0–30, 31–60, …, 511–540 days, plus >540 days. The stale threshold remains >365, not >360. Therefore the exact stale total cannot be obtained by simply summing whole bins: the 361–390-day bin contains both active and stale files.
+- The previous stock is required. `current stale - inflow` is only the adjusted
+  stock left after subtracting inflow, not the interval's cleanup.
+- Bins use edges `0, 30, 60, …, 330, 365`: bounded bins are `[lower, upper)`,
+  then `365+`. Stale means age 365 or more, so the `365+` bin is exactly the
+  stale total and there is no crossing bin to split.
+- For a 28-day step only ages 337-364 cross: ages 330-336 stay active, and age
+  365 is already stale at the previous scan, so it is not inflow. The whole-bin
+  assumption therefore overstates inflow by about 7 age-days. In this uniform
+  fixture the estimate is 43.8% high for atlas (2,944 vs 2,048 GiB/month) and
+  25.0% high for birch. State the bias; do not clamp or hide it.
+- Cheap: aggregate bins only, no new acquisition. Assumes a stable age density
+  within the bucket and no reaccess, size change or migration.
+- Signed residuals are kept. A negative value means the assumption does not
+  explain the observed change; it is not negative cleanup. Even a positive
+  value is **not verified team cleanup**.
+- `calculate_kpi` implements the candidate hook. Consecutive weekly calls use
+  the scan exactly 28 days before `current` as the baseline, so the metric plots
+  directly; weeks before a month of history exists are gaps.
 
-With a seven-day interval, prior ages 359–365 will cross the threshold if the files remain present and untouched. Those ages span parts of the 331–360 and 361–390 bins; neither bin isolates the incoming cohort.
+## Reference approach B: rolling stale-inventory diff (`solutions/inventory_diff.py`)
 
-The reference first uses the independent exact `stale_gib` total to split the crossing bin: subtract the wholly-stale bins to obtain the crossing bin's stale portion, then subtract that portion from the bin total to obtain its active portion. This is an inference from available aggregates, not an extra acquired bucket.
+Keep the previous month's stale IDs and diff today's inventory against them:
 
-It then estimates overlap uniformly within the relevant active ages. Do not blindly prorate the whole 361–390-day bin: the first synthetic scan has data at active ages 361–365 but none at stale ages 366–390. The fixture is uniform across active age-days, not necessarily across the entire crossing bin.
+```text
+disappeared = previously stale IDs absent today     -> cleanup proxy
+reaccessed  = present, now age < 365                -> left stale stock
+retained    = stale in both; size delta tracked     -> stays stale
+first seen  = stale today with no old stale ID      -> aging-in or new
+```
 
-The remaining uniform-age assumption must be labeled and defended. It agrees with this fixture's ground truth, not necessarily with production distributions. Finer retained age cohorts or new boundary-cohort acquisition reduce uncertainty without retaining every file.
+Run `--demo` for a checked four-record example (conservation residual zero) and
+the default mode for the acquisition gap. Add `--plot DIR` to call the KPI hook
+through the candidate plotting helper; on the supplied fixture that saves only
+the stale graph because historical detail is missing.
 
-The reference keeps signed residuals. A negative value is not "negative cleanup" to publish blindly: it indicates that the model's assumptions do not explain the observed change. Silently clamping it to zero hides that signal.
-
-Even a positive residual is **not verified team cleanup**. Reaccess, size changes, scope changes, migration, or missing observations can produce similar effects. The supplied main fixture excludes those effects, but a production metric cannot assume that without evidence.
-
-## Reference approach B: file-level comparison
-
-Match stable identities across complete comparable inventories. Distinguish:
-
-- Previously stale files missing from the next scan.
-- Previously stale files present but accessed again.
-- Existing files newly entering the stale category.
-- Files first observed already stale.
-- Size changes among files that remain stale.
-
-This supports a more explicit reconciliation than aggregate snapshots. It still does not prove the actor or cause of disappearance, or physical space reclaimed.
-
-**This is a future-acquisition alternative, not a KPI recoverable from the current dataset.** The reference comparison is tested on constructed historical inventories, but the reference CLI must report that history is unavailable for the distributed fixture. Treating unavailable detail as an empty scan would falsely count every old file as removed.
-
-Trade-offs include identity semantics, rename/replacement handling, scan consistency, retention volume, joins, and processing cost. The production FSMON aggregation path uses basenames in its intermediate iteration; those are not sufficient stable identifiers for this comparison. The synthetic fixture deliberately supplies stable IDs.
+- `disappeared` is an upper bound on cleanup: migration, lost mounts, identity
+  churn and rename-with-new-ID are indistinguishable. Attribution needs action
+  evidence, and logical GiB need not equal physical reclaimed space.
+- Keeping only stale IDs mixes aging-in with genuinely new files. Retain a
+  near-threshold active set or all IDs to split them.
+- Historical detail is not retained in the fixture, so `calculate_kpi` returns
+  None and the CLI reports the acquisition gap rather than pretending an empty
+  scan is a full one. Production also needs stable identities, consistent scan
+  scope and a defensible rename/replacement policy.
+- Retention scale, computed once in the module docstring: a record with full
+  path (~100 B), size (8 B) and age (4 B) is about 112 B. One disk with a
+  billion files and 25% stale is 250M records, about 28 GB per retained month.
+  Three thousand such disks is about 84 TB per month, or roughly 1 PB for a
+  year of monthly copies. Compression or sampling changes the constant, not the
+  order of magnitude.
 
 ## Other credible proposals
 
 **Cleanup-action journal:** instrument the team's cleanup workflow to record completed actions, actor, time, file/directory identity, pre-action stale size, and verified outcome. Measure actual action results rather than planned directory sizes. This is the strongest direction for team attribution, but misses out-of-band work unless collection is comprehensive.
 
 **Retained aggregate cohorts:** persist small daily age distributions or near-threshold cohorts over the reporting horizon. Estimate incoming stale volume cheaply and report adjusted progress alongside the raw stale-stock trend. Choose precision, cadence, and retention deliberately.
+
+**Near-threshold aggregate cohort:** retain daily sizes only for ages ~300-395. Inflow is then measured directly instead of assumed, with no file IDs and no uniform-age guess. Cost is roughly a hundred daily values per disk per month, kilobytes rather than the GiB-scale inventories in approach B. This is often the best accuracy-per-byte compromise.
+
+**Sampled inventory diff:** retain a deterministic hash sample (for example 1%) of stale IDs, diff the sample, then scale by 1/p. Retention drops about 100x and statistical confidence can be stated. Good when approximate cleanup trend matters more than an exact total.
+
+**Membership sketch:** store a Bloom or XOR filter of last month's stale IDs (about 1.2 B/file at 1% false positives) and test today's IDs for absence. Cheap disappearance counts; pair with aggregate size classes to turn counts into GiB. False positives cause a small undercount, never false "disappeared".
+
+**Filesystem event / change feed:** use fanotify/inotify, an fsmon journal, filesystem generation numbers, or a deletion audit trail to record removals as events. Exact timing and possible actor attribution, but only if collection is comprehensive; otherwise out-of-band work is invisible. Metadata-only, so logical size still needs accounting.
+
+**Snapshot metadata diff:** if disks or backups already have monthly snapshots, diff their metadata (`zfs diff`, btrfs subvolume comparison, backup catalog). No new per-file inventory, but snapshot retention, metadata scan cost and snapshot-consistency questions remain.
+
+**First-observed-stale markers:** persist a `stale_since` marker or side row the first month a file is seen stale. Later absence is cleanup, and marker presence separates aging-in from genuinely new files. One small row per stale file and no full path history; still per-ID and needs identity stability.
+
+**Survival / decay model:** estimate per-cohort retention rates from the aggregate age distribution and report expected exits with uncertainty. No new acquisition, but assumption-heavy and unsuitable for attribution.
+
+**Physical reclaim cross-check:** compare filesystem free-space and block-allocation counters. This measures actual reclaimed space but is polluted by concurrent writes, snapshots, deduplication and compression; use it as corroboration, not as the cleanup KPI.
 
 **Hybrid:** use an aggregate fleet-level estimate, action records for credited team cleanup, and selective file-level reconciliation for investigations. Keep those measures separately named instead of pretending they are interchangeable.
 
@@ -141,8 +179,8 @@ From the project root:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.generate_dataset --check
-PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.reference_solution --method aggregate
-PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.reference_solution --method files
+PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.solutions.cohort --verify
+PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.solutions.inventory_diff --demo
 ```
 
-The aggregate reference should recover 512 GiB per week for atlas and 448 GiB for birch under the main fixture's uniform-cohort assumptions. The file reference should explain that older detail is unavailable and new data collection is needed. Neither reference fills in the candidate's unfinished function.
+The 28-day cohort reference estimates 2,944 GiB/month for atlas and 2,240 GiB for birch, which is 43.8% and 25.0% above the private synthetic schedule (2,048 and 1,792). That gap is the stated bucket-boundary bias, not a bug: the whole 330-365 bin is treated as inflow while ages 330-336 stay active and age 365 is already stale at the previous scan. The inventory reference explains that older detail is unavailable and new data collection is needed. Neither solution fills in the candidate's unfinished function; both implement the same `calculate_kpi` signature so the report and plotting helpers can call them.

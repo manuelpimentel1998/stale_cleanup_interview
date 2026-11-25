@@ -1,7 +1,7 @@
 """Immutable scan, age-bin, file-detail, and candidate KPI records.
 
 Storage quantities use GiB (2**30 bytes). File ages are integer days measured
-at the scan date; age 365 is active and age 366 is stale. Record construction
+at the scan date; age 364 is active and age 365 is stale. Record construction
 does not perform validation; CSV values are validated by the repository.
 """
 
@@ -20,7 +20,7 @@ class Snapshot:
         scanned_at: Date of the scan, also part of its identity.
         complete: Whether the scan covered the entire disk.
         total_gib: Total storage in GiB, including active and stale files.
-        stale_gib: Exact storage in GiB with file age strictly greater than 365.
+        stale_gib: Exact storage in GiB with file age at least 365 days.
     """
     disk: str
     owner: str
@@ -39,8 +39,9 @@ class AgeBucket:
         max_age_days: Inclusive upper bound, or None for an unbounded interval.
         size_gib: Combined file size in GiB within the interval.
 
-    The supplied intervals represent approximate 30-day months through day
-    540, followed by overflow. They do not redefine the stale-age threshold.
+    The supplied bins follow the edges 0, 30, 60, ..., 330, 365: their inclusive
+    bounds are 0-29, 30-59, ..., 330-364, then 365+. They do not redefine the
+    stale-age threshold.
     """
     min_age_days: int
     max_age_days: Optional[int]
@@ -58,7 +59,7 @@ class FileRecord:
         path: Full synthetic absolute file path.
         size_gib: File size in GiB.
         days_since_last_access: Nonnegative integer age at this scan, not an
-            access date. An age strictly greater than 365 is stale.
+            access date. An age of at least 365 days is stale.
     """
     disk: str
     scanned_at: date

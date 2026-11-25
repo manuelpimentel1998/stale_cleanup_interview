@@ -26,7 +26,7 @@ The plotting command saves `graphs/stale.png` and, when the candidate hook retur
 
 The production constraint is explicit: thousands of disks with millions of files each. The fixture retains a year of weekly aggregated history but only the latest weekly detailed file scan per disk. Aggregate totals and wide age-bin columns are combined in `candidate/data/scans.csv`.
 
-Stored size values use GiB. File details contain `days_since_last_access` rather than an access date. The wide age columns cover 18 approximate 30-day months (through 540 days), plus older data. The independent stale total still uses a strict 365-day threshold, which cuts through the 361–390-day bin.
+Stored size values use GiB. File details contain `days_since_last_access` rather than an access date. The wide age columns use bucket edges `0, 30, 60, …, 330, 365`, so each bounded bin is `[lower, upper)` and there is one `365+` bin. Stale means age 365 or more, which is exactly that bin.
 
 ## Prepare as the interviewer
 
@@ -35,8 +35,8 @@ Read `interviewer/GUIDE.md`. From this project directory:
 ```bash
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
 PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.generate_dataset --check
-PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.reference_solution --method aggregate
-PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.reference_solution --method files
+PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.solutions.cohort --verify
+PYTHONDONTWRITEBYTECODE=1 python3 -m interviewer.solutions.inventory_diff --demo
 ```
 
 Python 3.9 or newer is required. Matplotlib is the only added runtime dependency and is used for plotting. Data fetching and the text report remain local; there are no credentials, network calls, or production-data access. Installing a missing dependency may require package-index access.

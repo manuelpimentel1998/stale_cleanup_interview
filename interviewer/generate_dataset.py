@@ -56,8 +56,8 @@ def _csv(columns: List[str], rows: List[Tuple]) -> bytes:
 def generate_contents() -> Dict[str, bytes]:
     """Build deterministic aggregate, latest-file, and private truth content.
 
-    Transient inventories start with one active cohort at each age 0..365 and
-    separate stale groups. Each intervening day adds an active cohort; weekly
+    Transient inventories start with one cohort at each age 0..365 (age 365 is
+    stale) and separate stale groups. Each intervening day adds an active cohort;
     removals affect only groups already stale at the previous scan. Monthly
     bins and exact stale GiB are derived independently from those inventories.
 
@@ -102,14 +102,14 @@ def generate_contents() -> Dict[str, bytes]:
         previous_inventory = None
         previous_date = None
         initial_total = sum(item.size_gib for item in inventory.values())
-        initial_stale = initial_groups * group_gib
+        initial_stale = (initial_groups + 1) * group_gib  # age 365 is already stale
         disk_intervals = []
         for index in range(WEEKS + 1):
             scanned_at = START + timedelta(days=7 * index)
             removed_files = []
             if index:
                 eligible = [group for group in groups if all(
-                    identity in inventory and (previous_date - inventory[identity].last_accessed).days > 365
+                    identity in inventory and (previous_date - inventory[identity].last_accessed).days >= 365
                     for identity in group
                 )]
                 for group in eligible[:removed_groups]:
@@ -121,7 +121,7 @@ def generate_contents() -> Dict[str, bytes]:
                     add_groups(1, previous_date + timedelta(days=day))
             ordered = sorted(inventory.values(), key=lambda item: item.file_id)
             total = sum(item.size_gib for item in ordered)
-            stale = sum(item.size_gib for item in ordered if (scanned_at - item.last_accessed).days > 365)
+            stale = sum(item.size_gib for item in ordered if (scanned_at - item.last_accessed).days >= 365)
             bucket_gib = []
             for lower, upper in BOUNDS:
                 members = [item for item in ordered if lower <= (scanned_at - item.last_accessed).days
@@ -133,9 +133,9 @@ def generate_contents() -> Dict[str, bytes]:
             active_by_age = {}
             for item in ordered:
                 age = (scanned_at - item.last_accessed).days
-                if age <= 365:
+                if age < 365:
                     active_by_age[age] = active_by_age.get(age, 0) + item.size_gib
-            if active_by_age != {age: group_gib for age in range(366)}:
+            if active_by_age != {age: group_gib for age in range(365)}:
                 raise AssertionError("Daily active cohorts are not uniform")
             scans.append((disk, owner, scanned_at.isoformat(), "true", total, stale, *bucket_gib))
             if index == WEEKS:
@@ -143,8 +143,8 @@ def generate_contents() -> Dict[str, bytes]:
                               item.size_gib, (scanned_at - item.last_accessed).days) for item in ordered)
             if index:
                 aged_in = sum(item.size_gib for item in ordered if item.file_id in previous_inventory
-                              and (previous_date - item.last_accessed).days <= 365
-                              and (scanned_at - item.last_accessed).days > 365)
+                              and (previous_date - item.last_accessed).days < 365
+                              and (scanned_at - item.last_accessed).days >= 365)
                 interval = {
                     "disk": disk, "previous_scanned_at": previous_date.isoformat(),
                     "current_scanned_at": scanned_at.isoformat(), "elapsed_days": 7,
@@ -152,7 +152,7 @@ def generate_contents() -> Dict[str, bytes]:
                     "scheduled_removed_file_ids": sorted(item.file_id for item in removed_files),
                     "aged_in_gib": aged_in, "new_active_gib": 7 * group_gib,
                     "previous_stale_gib": sum(item.size_gib for item in previous_inventory.values()
-                                                if (previous_date - item.last_accessed).days > 365),
+                                                if (previous_date - item.last_accessed).days >= 365),
                     "current_stale_gib": stale,
                 }
                 if interval["previous_stale_gib"] - interval["scheduled_stale_removals_gib"] + aged_in != stale:
@@ -173,14 +173,15 @@ def generate_contents() -> Dict[str, bytes]:
             "aged_in_gib": sum(item["aged_in_gib"] for item in disk_intervals),
         })
     ground_truth = {
-        "stale_definition": "Integer age in days > 365; age 365 is active and age 366 is stale.",
+        "stale_definition": "Integer age in days >= 365; age 364 is active and age 365 is stale.",
         "metric_unit": "GiB (2**30 bytes)",
-        "age_bins": "18 approximate 30-day months through age 540 inclusive, then 541+; stale remains strictly age >365.",
+        "age_bins": "Bucket edges 0, 30, 60, ..., 330, 365: each bounded bin is [lower, upper), then 365+. "
+                    "Stale is exactly age >=365, so the 365+ bin is the stale total.",
         "first_scan": START.isoformat(), "last_scan": (START + timedelta(days=7 * WEEKS)).isoformat(),
         "scan_count_per_disk": WEEKS + 1, "interval_days": 7,
-        "schedule": "Initially seed one active cohort at each integer age 0..365 and stale cohorts at age 450. "
-                    "Add one new active cohort on each intervening day; each week remove only groups already "
-                    "stale at the previous scan. Atlas adds 128 GiB/day and removes 512 GiB/week; "
+        "schedule": "Initially seed one cohort at each integer age 0..365 (age 365 is already stale) and stale "
+                    "cohorts at age 450. Add one new active cohort on each intervening day; each week remove only "
+                    "groups already stale at the previous scan. Atlas adds 128 GiB/day and removes 512 GiB/week; "
                     "birch adds 64 GiB/day and removes 448 GiB/week.",
         "retention": "Only the latest weekly file inventories are exported; historical inventories exist transiently during generation only.",
         "assumptions": ["Complete scans", "Stable disk and file identities", "No reaccess, size changes or migration",
