@@ -24,7 +24,7 @@ The existing stale-data report works. The proposed KPI is initially shown as not
 
 The plotting command saves `graphs/stale.png` and, when the candidate hook returns results, one `graphs/kpi-N.png` per distinct metric name/unit. It prints the files produced in that run and needs no interactive display. The unchanged starter produces only the stale-data graph; no reference answer is injected.
 
-The production constraint is explicit: thousands of disks with millions of files each. The fixture retains a year of weekly aggregated history but only the latest weekly detailed file scan per disk. Aggregate totals and wide age-bin columns are combined in `candidate/data/scans.csv`.
+The production constraint is explicit: thousands of disks, each with millions of files — potentially billions of paths per fleet scan. The fixture retains a year of weekly aggregated history but only the latest weekly detailed file scan per disk. Aggregate totals and wide age-bin columns are combined in `candidate/data/scans.csv`.
 
 Stored size values use GiB. File details contain `days_since_last_access` rather than an access date. The wide age columns use bucket edges `0, 30, 60, …, 330, 365`, so each bounded bin is `[lower, upper)` and there is one `365+` bin. Stale means age 365 or more, which is exactly that bin.
 

@@ -2,11 +2,11 @@
 
 ## The situation
 
-We monitor disk usage and recommend improvements to disk owners. One metric is **stale data**: the size of files that have not been accessed for over a year.
+We monitor disk usage and recommend improvements to disk owners. One metric is **stale data**: the size of files that have not been accessed for at least a year (365 days or more).
 
 The team is actively cleaning up stale data. However, the stale-data total keeps growing, so our current report does not show leadership how much cleanup is happening.
 
-The production system covers **thousands of disks, each containing millions of files**. Acquisition, processing, and historical storage costs must be part of your proposal; the small synthetic dataset does not remove those constraints.
+The production system covers **thousands of disks, each containing millions of files** — billions of file paths fleet-wide. Acquisition, processing, and historical storage costs must be part of your proposal; the small synthetic dataset does not remove those constraints.
 
 ## Your objectives
 
@@ -58,7 +58,7 @@ The fixture contains two disks and **one year of weekly aggregated disk informat
 
 | Dataset                  | Contents                                                                                                     |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `data/scans.csv`       | One row per disk and date: owner, coverage status, `total_gib`, `stale_gib`, and one GiB-size column per monthly age bin. Aggregate history is retained for the past year. |
+| `data/scans.csv`       | One row per disk and date: owner, coverage status, `total_gib`, `stale_gib`, and one GiB-size column per age bin. Aggregate history is retained for the past year. |
 | `data/files.csv`       | Only the latest weekly detailed scan: disk, scan date, file ID, path, `size_gib`, and integer `days_since_last_access`. No historical file snapshots or last-access date column. |
 
 The repository provides:
@@ -70,7 +70,7 @@ The repository provides:
 For this exercise:
 
 - `days_since_last_access` is the whole number of days since a file was last accessed, measured at the scan date.
-- "Over a year" means **365 days or more**: age 364 is not stale; age 365 is stale.
+- "A year or more" means **365 days or more**: age 364 is not stale; age 365 is stale.
 - Age bins use the edges `0, 30, 60, …, 300, 330, 365`: each bounded bin covers `[lower, upper)`, so `age_0_30_gib` covers ages 0–29 and `age_330_365_gib` covers 330–364. The final `age_365_plus_gib` bin starts at age 365.
 - The `age_365_plus_gib` bin is exactly the stale bucket. `stale_gib` is its total; there is no crossing-bin split to infer.
 - All stored size values and the existing stale-data report use **GiB** (1 GiB = 1,073,741,824 bytes). Sizes are logical file sizes; fractional GiB are supported. Your KPI can use a different unit.

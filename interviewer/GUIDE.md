@@ -30,7 +30,7 @@ Do not use the project test suite as a candidate autograder. Some tests establis
 
 ## Dataset ground truth
 
-There are 53 weekly scans per disk, from 2025-11-23 through 2026-11-22: 52 seven-day intervals. The merged `scans.csv` contains 106 rows with total/stale GiB and one column per monthly age bin. `files.csv` contains only the final scan for each disk, with integer days since last access rather than access dates. Values below are GiB.
+There are 53 weekly scans per disk, from 2025-11-23 through 2026-11-22: 52 seven-day intervals. The merged `scans.csv` contains 106 rows with total/stale GiB and one column per age bin. `files.csv` contains only the final scan for each disk, with integer days since last access rather than access dates. Values below are GiB.
 
 | Disk | Stale-data history | Data aging into stale per interval | Previously stale data removed per interval |
 | --- | --- | --- | --- |
@@ -74,8 +74,8 @@ estimated cleanup = previous stale + previous 330-365 bucket - current stale
 ```
 
 The month's aging inflow is assumed to be the whole previous 11-12 month bucket
-(ages 330-364, the `330-365` edge bin), because those files should now be at or
-over a year. A month is assumed to be exactly 28 days, so weekly scans give
+(ages 330-364, the `330-365` edge bin), as if that whole cohort reached a year
+during the month. A month is assumed to be exactly 28 days, so weekly scans give
 non-overlapping four-scan pairs. Verify with
 `python3 -m interviewer.solutions.cohort --verify`; add `--plot DIR` to save the
 KPI graph through the candidate plotting helper.
